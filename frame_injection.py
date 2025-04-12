@@ -1,63 +1,57 @@
 import cv2
 import numpy as np
 
-def overlay_person(frame, overlay_img, x, y):
-    # Get dimensions of the overlay image
-    h, w = overlay_img.shape[:2]
-    
-    # Extract the alpha channel from the overlay image
-    overlay_bgra = cv2.cvtColor(overlay_img, cv2.COLOR_BGRA2RGBA)
-    overlay_rgb = overlay_bgra[..., :3]
-    alpha = overlay_bgra[..., 3:] / 255.0
-
-    # Region of Interest (ROI) in the background frame
+def overlay_person(frame, person_img, x, y):
+    h, w = person_img.shape[:2]
+    person_bgr = person_img[:, :, :3]
+    person_alpha = person_img[:, :, 3] / 255.0 
     roi = frame[y:y+h, x:x+w]
 
-    # Blend the overlay and ROI using alpha transparency
-    blended = (overlay_rgb * alpha + roi * (1 - alpha)).astype(np.uint8)
+    for c in range(3):  
+        roi[:, :, c] = person_bgr[:, :, c] * person_alpha + roi[:, :, c] * (1 - person_alpha)
 
-    # Insert the blended ROI back into the frame
-    frame[y:y+h, x:x+w] = blended
-    
     return frame
 
-# Load transparent PNG (person image with alpha channel)
-overlay_img = cv2.imread("person.jpeg", cv2.IMREAD_UNCHANGED)
+person_img = cv2.imread("person.jpeg", cv2.IMREAD_UNCHANGED)
+if person_img.shape[2] == 3:  
+    b, g, r = cv2.split(person_img)
+    alpha = np.ones_like(b) * 255  
+    person_img = cv2.merge((b, g, r, alpha))
+    
 
-# Initialize video capture (0 for webcam, or file path)
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(0) 
 
-# Set overlay position (adjust as needed)
-x, y = 100, 100  # Top-left coordinates
+x, y = 100, 100  
+drag = False 
+
+def mouse_event(event, px, py, flags, param):
+    global x, y, drag
+    if event == cv2.EVENT_LBUTTONDOWN:
+        drag = True
+        x, y = px - person_img.shape[1]//2, py - person_img.shape[0]//2
+    elif event == cv2.EVENT_MOUSEMOVE and drag:
+        x, y = px - person_img.shape[1]//2, py - person_img.shape[0]//2
+    elif event == cv2.EVENT_LBUTTONUP:
+        drag = False
+
+cv2.namedWindow('Composite Feed')
+cv2.setMouseCallback('Composite Feed', mouse_event)
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    # Flip frame if using webcam
     frame = cv2.flip(frame, 1)
 
-    # Resize overlay if needed
-    # overlay_img = cv2.resize(overlay_img, (new_width, new_height))
+    img_h, img_w = person_img.shape[:2]
+    x = max(0, min(x, frame.shape[1] - img_w))
+    y = max(0, min(y, frame.shape[0] - img_h))
 
-    # Ensure overlay stays within frame bounds
-    h, w = overlay_img.shape[:2]
-    if x + w > frame.shape[1]:
-        x = frame.shape[1] - w
-    if y + h > frame.shape[0]:
-        y = frame.shape[0] - h
-    if x < 0: x = 0
-    if y < 0: y = 0
+  
+    composite = overlay_person(frame.copy(), person_img, x, y)
 
-    # Overlay the person image
-    frame_with_overlay = overlay_person(frame.copy(), overlay_img, x, y)
-
-    # This is where you would normally send the frame to your OD system
-    # od_results = object_detection_model(frame_with_overlay)
-
-    # Display result (replace with your OD system processing)
-    cv2.imshow('Video Feed with Overlay', frame_with_overlay)
+    cv2.imshow('Composite Feed', composite)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
